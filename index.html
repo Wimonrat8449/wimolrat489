@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="th" class="h-full bg-slate-50">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Public Health Real-time Monitoring Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for visualizations -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Leaflet JS & CSS for interactive maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- PapaParse for parsing remote CSV data -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Font (Kanit / Inter) -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Kanit', sans-serif; }
+        #map { min-height: 400px; height: 100%; border-radius: 0.75rem; z-index: 10; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body class="h-full flex flex-col text-slate-800">
+
+    <!-- Top Navigation Bar -->
+    <header class="bg-teal-700 text-white shadow-md">
+        <div class="max-w-7xl mx-mx-auto px-4 sm:px-6 lg:px-8 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <div class="bg-white/10 p-2.5 rounded-xl text-teal-100">
+                    <i class="fa-solid fa-heart-pulse text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl sm:text-2xl font-bold tracking-tight">ระบบเฝ้าระวังทางสาธารณสุข (Public Health Dashboard)</h1>
+                    <p class="text-xs text-teal-200">รายงานข้อมูลและตัวชี้วัดสุขภาพแบบเรียลไทม์</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-3 bg-teal-800/60 px-4 py-2 rounded-lg border border-teal-600/40 text-sm">
+                <i class="fa-solid fa-rotate text-teal-300 animate-spin" id="sync-spinner" style="display: none;"></i>
+                <span class="text-teal-200 text-xs">อัปเดตล่าสุด:</span>
+                <span id="last-updated" class="font-medium text-white">กำลังโหลด...</span>
+                <button onclick="fetchHealthData()" class="ml-2 text-xs bg-teal-600 hover:bg-teal-500 text-white px-2.5 py-1 rounded transition shadow">
+                    <i class="fa-solid fa-arrows-rotate mr-1"></i> รีเฟรช
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Container -->
+    <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6">
+
+        <!-- Status & Error Alert Container -->
+        <div id="alert-box" class="hidden p-4 rounded-xl text-sm flex items-center justify-between border"></div>
+
+        <!-- Metrics Cards Grid -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- Total Cases / Rows -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">จำนวนระเบียนรวม</p>
+                    <p id="stat-total" class="text-3xl font-bold text-slate-800 mt-1">0</p>
+                    <p class="text-xs text-emerald-600 mt-1 flex items-center gap-1">
+                        <i class="fa-solid fa-database"></i> ข้อมูลนำเข้าเรียบร้อย
+                    </p>
+                </div>
+                <div class="p-3 bg-teal-50 text-teal-600 rounded-xl">
+                    <i class="fa-solid fa-hospital-user text-2xl"></i>
+                </div>
+            </div>
+
+            <!-- Primary Metric Numeric A -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <p id="stat-label-1" class="text-xs font-medium text-slate-500 uppercase tracking-wider">ตัวแปรหลัก 1</p>
+                    <p id="stat-val-1" class="text-3xl font-bold text-slate-800 mt-1">0</p>
+                    <p class="text-xs text-slate-400 mt-1">ค่ารวม / การสะสม</p>
+                </div>
+                <div class="p-3 bg-indigo-50 text-indigo-600 rounded-xl">
+                    <i class="fa-solid fa-chart-line text-2xl"></i>
+                </div>
+            </div>
+
+            <!-- Primary Metric Numeric B -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <p id="stat-label-2" class="text-xs font-medium text-slate-500 uppercase tracking-wider">ตัวแปรหลัก 2</p>
+                    <p id="stat-val-2" class="text-3xl font-bold text-slate-800 mt-1">0</p>
+                    <p class="text-xs text-slate-400 mt-1">ค่าเฉลี่ยตัวอย่าง</p>
+                </div>
+                <div class="p-3 bg-amber-50 text-amber-600 rounded-xl">
+                    <i class="fa-solid fa-calculator text-2xl"></i>
+                </div>
+            </div>
+
+            <!-- Total Categories/Provinces -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                <div>
+                    <p class="text-xs font-medium text-slate-500 uppercase tracking-wider">การกระจายตัวจำแนกกลุ่ม</p>
+                    <p id="stat-categories" class="text-3xl font-bold text-slate-800 mt-1">0</p>
+                    <p class="text-xs text-indigo-600 mt-1">หมวดหมู่ทั้งหมด</p>
+                </div>
+                <div class="p-3 bg-purple-50 text-purple-600 rounded-xl">
+                    <i class="fa-solid fa-layer-group text-2xl"></i>
+                </div>
+            </div>
+        </section>
+
+        <!-- Controls / Filters -->
+        <section class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-wrap gap-4 items-center justify-between">
+            <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                <span class="text-sm font-medium text-slate-600"><i class="fa-solid fa-filter text-slate-400 mr-1"></i> กรองข้อมูล:</span>
+                
+                <!-- Dynamic Category Selector -->
+                <select id="filter-category" onchange="applyFilters()" class="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-teal-500">
+                    <option value="ALL">-- แสดงกลุ่มทั้งหมด --</option>
+                </select>
+
+                <!-- Dynamic Column Selection for Charts -->
+                <select id="select-chart-column" onchange="renderCharts()" class="bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-teal-500">
+                    <!-- Populated dynamically -->
+                </select>
+            </div>
+
+            <div class="w-full md:w-auto flex items-center gap-2">
+                <div class="relative w-full">
+                    <i class="fa-solid fa-magnifying-glass absolute left-3 top-3 text-slate-400 text-sm"></i>
+                    <input type="text" id="search-input" onkeyup="applyFilters()" placeholder="ค้นหาข้อมูล..." class="pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 text-slate-700 text-sm rounded-lg w-full outline-none focus:ring-2 focus:ring-teal-500">
+                </div>
+            </div>
+        </section>
+
+        <!-- GIS Map & Visualizations Grid -->
+        <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Map Container (Takes 2 Columns on Large Screens) -->
+            <div class="lg:col-span-2 bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-base font-semibold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-map-location-dot text-teal-600"></i> แผนที่เชิงภูมิสารสนเทศทางสาธารณสุข
+                    </h2>
+                    <span class="text-xs text-slate-400" id="map-status">กำลังแสดงตำแหน่งพิกัด GPS/พื้นที่</span>
+                </div>
+                <div id="map" class="flex-1 min-h-[380px]"></div>
+            </div>
+
+            <!-- Primary Pie/Doughnut Chart -->
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col justify-between">
+                <div class="flex items-center justify-between mb-3">
+                    <h2 class="text-base font-semibold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-chart-pie text-teal-600"></i> สัดส่วนการกระจายข้อมูล
+                    </h2>
+                </div>
+                <div class="relative flex-1 flex items-center justify-center min-h-[300px]">
+                    <canvas id="pieChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Bar Chart Visualizing Metrics -->
+        <section class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-base font-semibold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-chart-simple text-teal-600"></i> กราฟเปรียบเทียบข้อมูลตามกลุ่ม/พื้นที่
+                </h2>
+            </div>
+            <div class="relative h-72 w-full">
+                <canvas id="barChart"></canvas>
+            </div>
+        </section>
+
+        <!-- Dynamic Data Table -->
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+            <div class="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <h2 class="text-base font-semibold text-slate-800 flex items-center gap-2">
+                    <i class="fa-solid fa-table text-teal-600"></i> รายการข้อมูลตารางสาธารณสุข
+                </h2>
+                <span id="row-count-badge" class="bg-teal-100 text-teal-800 text-xs font-medium px-2.5 py-0.5 rounded-full">0 รายการ</span>
+            </div>
+            <div class="overflow-x-auto max-h-96 custom-scrollbar">
+                <table class="w-full text-sm text-left text-slate-600">
+                    <thead class="text-xs text-slate-700 uppercase bg-slate-100/80 sticky top-0 backdrop-blur-sm">
+                        <tr id="table-header">
+                            <!-- Headers dynamically injected -->
+                        </tr>
+                    </thead>
+                    <tbody id="table-body" class="divide-y divide-slate-100">
+                        <!-- Data rows dynamically injected -->
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-slate-200 py-4 mt-auto">
+        <div class="max-w-7xl mx-auto px-4 text-center text-xs text-slate-500">
+            <p>ระบบติดตามและแดชบอร์ดสาธารณสุข | พัฒนาเพื่อการประมวลผลข้อมูลเรียลไทม์ผ่าน Google Sheets CSV</p>
+        </div>
+    </footer>
+
+    <!-- Application Script -->
+    <script>
+        // Google Sheets CSV Data URL (Updated to new source link)
+        const BASE_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSWuetob7BMA4XRWV3N8l6PN1aDr522IBIIu7ebxLvTaR3xA2WRXqmaH6n8Jb5OCwXz9FmoIOcolMAU/pub?gid=1997987551&single=true&output=csv';
+
+        // State Variables
+        let rawData = [];
+        let filteredData = [];
+        let headers = [];
+        let map = null;
+        let mapMarkers = [];
+        let pieChartInstance = null;
+        let barChartInstance = null;
+
+        // Auto Refresh Interval (5 minutes)
+        const REFRESH_INTERVAL = 5 * 60 * 1000;
+
+        window.onload = function() {
+            initMap();
+            fetchHealthData();
+            setInterval(fetchHealthData, REFRESH_INTERVAL);
+        };
+
+        // Initialize GIS Leaflet Map
+        function initMap() {
+            // Default center point (Thailand centered)
+            map = L.map('map').setView([13.7563, 100.5018], 6);
+            
+            // Esri World Topo Map as Primary Layer
+            const esriTopo = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri'
+            }).addTo(map);
+
+            // Esri World Imagery (Satellite) Layer Option
+            const esriImagery = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri'
+            });
+
+            // Add Layer Control for switching between Street and Satellite views
+            const baseMaps = {
+                "Esri Topo Map": esriTopo,
+                "Esri Satellite Imagery": esriImagery
+            };
+            L.control.layers(baseMaps).addTo(map);
+        }
+
+        // Fetch CSV Live Data (With Cache Busting)
+        function fetchHealthData() {
+            showSpinner(true);
+            
+            // Add Timestamp parameter to force cache bypass on client-side
+            const cacheBustUrl = BASE_CSV_URL + '&_t=' + new Date().getTime();
+
+            Papa.parse(cacheBustUrl, {
+                download: true,
+                header: true,
+                skipEmptyLines: true,
+                complete: function(results) {
+                    showSpinner(false);
+                    if (results.data && results.data.length > 0) {
+                        rawData = results.data;
+                        headers = results.meta.fields || Object.keys(rawData[0]);
+                        filteredData = [...rawData];
+                        
+                        updateLastUpdatedTime();
+                        setupControls();
+                        processAndRenderData();
+                        showAlert('อัปเดตข้อมูลสดล่าสุดเรียบร้อยแล้ว', 'success');
+                    } else {
+                        showAlert('ไม่พบข้อมูลในไฟล์ CSV ที่ระบุ หรือรูปแบบข้อมูลไม่ถูกต้อง', 'error');
+                    }
+                },
+                error: function(err) {
+                    showSpinner(false);
+                    showAlert('ไม่สามารถดึงข้อมูลได้: ' + err.message + ' (อาจต้องรอ 5-10 นาทีเพื่อให้ Google Sync ข้อมูลใหม่)', 'error');
+                }
+            });
+        }
+
+        // Setup Dynamic Filters & Column Selectors
+        function setupControls() {
+            const categorySelect = document.getElementById('filter-category');
+            const columnSelect = document.getElementById('select-chart-column');
+
+            // Find potential categorical columns (Strings)
+            const catColumn = findCategoryColumn();
+
+            // Populate Category Filter Options
+            categorySelect.innerHTML = '<option value="ALL">-- แสดงกลุ่มทั้งหมด --</option>';
+            if (catColumn) {
+                const uniqueCategories = [...new Set(rawData.map(item => item[catColumn]).filter(Boolean))];
+                uniqueCategories.sort().forEach(cat => {
+                    const opt = document.createElement('option');
+                    opt.value = cat;
+                    opt.textContent = cat;
+                    categorySelect.appendChild(opt);
+                });
+            }
+
+            // Populate Dynamic Chart Columns
+            columnSelect.innerHTML = '';
+            headers.forEach(h => {
+                const opt = document.createElement('option');
+                opt.value = h;
+                opt.textContent = `วิเคราะห์ตาม: ${h}`;
+                columnSelect.appendChild(opt);
+            });
+
+            if (catColumn) {
+                columnSelect.value = catColumn;
+            }
+        }
+
+        // Process and Render Visual Components
+        function processAndRenderData() {
+            renderKPIs();
+            renderTable();
+            renderCharts();
+            renderMapMarkers();
+        }
+
+        // Calculate and Render KPI Summary Cards
+        function renderKPIs() {
+            document.getElementById('stat-total').textContent = filteredData.length.toLocaleString();
+
+            const numCols = findNumericColumns();
+            const catCol = findCategoryColumn();
+
+            if (numCols.length > 0) {
+                const col1 = numCols[0];
+                const sum1 = filteredData.reduce((acc, row) => acc + (parseFloat(row[col1]) || 0), 0);
+                document.getElementById('stat-label-1').textContent = col1;
+                document.getElementById('stat-val-1').textContent = sum1.toLocaleString(undefined, { maximumFractionDigits: 1 });
+            } else {
+                document.getElementById('stat-label-1').textContent = "ข้อมูลเชิงปริมาณ 1";
+                document.getElementById('stat-val-1').textContent = "-";
+            }
+
+            if (numCols.length > 1) {
+                const col2 = numCols[1];
+                const avg2 = filteredData.length > 0 ? 
+                    filteredData.reduce((acc, row) => acc + (parseFloat(row[col2]) || 0), 0) / filteredData.length : 0;
+                document.getElementById('stat-label-2').textContent = `เฉลี่ย ${col2}`;
+                document.getElementById('stat-val-2').textContent = avg2.toLocaleString(undefined, { maximumFractionDigits: 1 });
+            } else {
+                document.getElementById('stat-label-2').textContent = "ข้อมูลเชิงปริมาณ 2";
+                document.getElementById('stat-val-2').textContent = "-";
+            }
+
+            if (catCol) {
+                const uniqueCats = new Set(filteredData.map(r => r[catCol]).filter(Boolean));
+                document.getElementById('stat-categories').textContent = uniqueCats.size.toLocaleString();
+            } else {
+                document.getElementById('stat-categories').textContent = "-";
+            }
+        }
+
+        // Render Dynamic Charts
+        function renderCharts() {
+            const chartCol = document.getElementById('select-chart-column').value || findCategoryColumn();
+            if (!chartCol) return;
+
+            // Grouping Logic
+            const counts = {};
+            filteredData.forEach(row => {
+                const val = row[chartCol] || 'ไม่ระบุ';
+                counts[val] = (counts[val] || 0) + 1;
+            });
+
+            const labels = Object.keys(counts).slice(0, 15); // Top 15 categories
+            const dataValues = labels.map(l => counts[l]);
+
+            const chartColors = [
+                '#0d9488', '#0284c7', '#6366f1', '#8b5cf6', '#ec4899',
+                '#f59e0b', '#10b981', '#64748b', '#f97316', '#06b6d4'
+            ];
+
+            // Render Doughnut / Pie Chart
+            if (pieChartInstance) pieChartInstance.destroy();
+            const ctxPie = document.getElementById('pieChart').getContext('2d');
+            pieChartInstance = new Chart(ctxPie, {
+                type: 'doughnut',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: dataValues,
+                        backgroundColor: chartColors,
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { font: { family: 'Kanit', size: 11 } } }
+                    }
+                }
+            });
+
+            // Render Bar Chart
+            if (barChartInstance) barChartInstance.destroy();
+            const ctxBar = document.getElementById('barChart').getContext('2d');
+            barChartInstance = new Chart(ctxBar, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `จำนวนตาม ${chartCol}`,
+                        data: dataValues,
+                        backgroundColor: '#0d9488',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { titleFont: { family: 'Kanit' }, bodyFont: { family: 'Kanit' } }
+                    },
+                    scales: {
+                        x: { ticks: { font: { family: 'Kanit', size: 10 } } },
+                        y: { beginAtZero: true, ticks: { font: { family: 'Kanit', size: 10 } } }
+                    }
+                }
+            });
+        }
+
+        // Render Leaflet GIS Markers
+        function renderMapMarkers() {
+            // Clear existing markers
+            mapMarkers.forEach(m => map.removeLayer(m));
+            mapMarkers = [];
+
+            const latKey = headers.find(h => /lat|latitude|ละติจูด|พิกัดละติจูด/i.test(h));
+            const lngKey = headers.find(h => /lng|lon|longitude|ลองจิจูด|พิกัดลองจิจูด/i.test(h));
+            const locationKey = headers.find(h => /province|จังหวัด|district|อำเภอ|subdistrict|ตำบล|location|สถานที่|address|ที่อยู่|ชื่อหน่วยงาน|โรงพยาบาล/i.test(h));
+
+            let bounds = [];
+
+            filteredData.forEach(row => {
+                let lat = parseFloat(row[latKey]);
+                let lng = parseFloat(row[lngKey]);
+
+                // Fallback demo coordinates mapping if lat/lng are missing but Thailand provinces are present
+                if ((isNaN(lat) || isNaN(lng)) && locationKey && row[locationKey]) {
+                    const locStr = String(row[locationKey]);
+                    if (locStr.includes('เชียงใหม่')) { lat = 18.7883; lng = 98.9853; }
+                    else if (locStr.includes('ขอนแก่น')) { lat = 16.4322; lng = 102.8236; }
+                    else if (locStr.includes('ชลบุรี')) { lat = 13.3611; lng = 100.9847; }
+                    else if (locStr.includes('สงขลา')) { lat = 7.1988; lng = 100.5951; }
+                    else if (locStr.includes('กรุงเทพ')) { lat = 13.7563; lng = 100.5018; }
+                    else if (locStr.includes('นครราชสีมา')) { lat = 14.9799; lng = 102.0978; }
+                    else if (locStr.includes('ภูเก็ต')) { lat = 7.8804; lng = 98.3923; }
+                }
+
+                if (!isNaN(lat) && !isNaN(lng)) {
+                    const popupContent = `
+                        <div class="font-kanit p-1">
+                            <h4 class="font-bold text-teal-700 text-sm mb-1">${row[locationKey] || 'จุดพิกัดสาธารณสุข'}</h4>
+                            <p class="text-xs text-slate-600">${Object.entries(row).slice(0, 5).map(([k,v]) => `<b>${k}:</b> ${v}`).join('<br>')}</p>
+                        </div>
+                    `;
+
+                    const marker = L.circleMarker([lat, lng], {
+                        radius: 7,
+                        fillColor: "#0d9488",
+                        color: "#ffffff",
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.85
+                    }).bindPopup(popupContent);
+
+                    marker.addTo(map);
+                    mapMarkers.push(marker);
+                    bounds.push([lat, lng]);
+                }
+            });
+
+            if (bounds.length > 0) {
+                map.fitBounds(bounds, { padding: [30, 30], maxZoom: 12 });
+                document.getElementById('map-status').textContent = `แสดงผล ${bounds.length} ตำแหน่งบนแผนที่`;
+            } else {
+                document.getElementById('map-status').textContent = `ไม่พบข้อมูลพิกัด (Lat/Lng) ในชุดข้อมูล`;
+            }
+        }
+
+        // Render Data Table
+        function renderTable() {
+            const tHeader = document.getElementById('table-header');
+            const tBody = document.getElementById('table-body');
+            
+            document.getElementById('row-count-badge').textContent = `${filteredData.length.toLocaleString()} รายการ`;
+
+            // Clear contents
+            tHeader.innerHTML = '';
+            tBody.innerHTML = '';
+
+            if (headers.length === 0 || filteredData.length === 0) {
+                tBody.innerHTML = `<tr><td colspan="100%" class="text-center py-8 text-slate-400">ไม่พบข้อมูล</td></tr>`;
+                return;
+            }
+
+            // Headers
+            headers.forEach(h => {
+                const th = document.createElement('th');
+                th.className = 'px-4 py-3 font-semibold';
+                th.textContent = h;
+                tHeader.appendChild(th);
+            });
+
+            // Rows (Limit to 100 max for smooth DOM performance)
+            filteredData.slice(0, 100).forEach(row => {
+                const tr = document.createElement('tr');
+                tr.className = 'hover:bg-slate-50 transition';
+                
+                headers.forEach(h => {
+                    const td = document.createElement('td');
+                    td.className = 'px-4 py-2.5 whitespace-nowrap text-xs';
+                    td.textContent = row[h] !== undefined ? row[h] : '';
+                    tr.appendChild(td);
+                });
+                tBody.appendChild(tr);
+            });
+        }
+
+        // Apply Search and Category Filters
+        function applyFilters() {
+            const catVal = document.getElementById('filter-category').value;
+            const searchVal = document.getElementById('search-input').value.toLowerCase().trim();
+            const catCol = findCategoryColumn();
+
+            filteredData = rawData.filter(row => {
+                // Category match
+                const matchCategory = (catVal === 'ALL' || !catCol) ? true : row[catCol] === catVal;
+                
+                // Text search match
+                const matchSearch = searchVal === '' ? true : Object.values(row).some(val => 
+                    String(val).toLowerCase().includes(searchVal)
+                );
+
+                return matchCategory && matchSearch;
+            });
+
+            processAndRenderData();
+        }
+
+        // Utility: Helper to find numeric columns
+        function findNumericColumns() {
+            if (rawData.length === 0) return [];
+            return headers.filter(h => {
+                const sample = rawData.find(r => r[h] !== "" && r[h] !== null);
+                return sample && !isNaN(parseFloat(sample[h]));
+            });
+        }
+
+        // Utility: Helper to find categorical column (e.g. Province, Category, Type)
+        function findCategoryColumn() {
+            if (headers.length === 0) return null;
+            const preferred = headers.find(h => /province|จังหวัด|group|กลุ่ม|type|ประเภท|category|หมวดหมู่|district|อำเภอ/i.test(h));
+            if (preferred) return preferred;
+            
+            // Fallback to first non-numeric column
+            const numCols = findNumericColumns();
+            return headers.find(h => !numCols.includes(h)) || headers[0];
+        }
+
+        // Utility: UI Helpers
+        function showSpinner(show) {
+            document.getElementById('sync-spinner').style.display = show ? 'inline-block' : 'none';
+        }
+
+        function updateLastUpdatedTime() {
+            const now = new Date();
+            document.getElementById('last-updated').textContent = now.toLocaleTimeString('th-TH');
+        }
+
+        function showAlert(msg, type) {
+            const alertBox = document.getElementById('alert-box');
+            alertBox.classList.remove('hidden', 'bg-emerald-50', 'text-emerald-800', 'border-emerald-200', 'bg-red-50', 'text-red-800', 'border-red-200');
+            
+            if (type === 'success') {
+                alertBox.classList.add('bg-emerald-50', 'text-emerald-800', 'border-emerald-200');
+                alertBox.innerHTML = `<span><i class="fa-solid fa-circle-check mr-2"></i>${msg}</span>`;
+            } else {
+                alertBox.classList.add('bg-red-50', 'text-red-800', 'border-red-200');
+                alertBox.innerHTML = `<span><i class="fa-solid fa-circle-exclamation mr-2"></i>${msg}</span>`;
+            }
+
+            setTimeout(() => {
+                alertBox.classList.add('hidden');
+            }, 4000);
+        }
+    </script>
+</body>
+</html>
